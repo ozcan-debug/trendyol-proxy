@@ -1,54 +1,50 @@
-const express = require('express');
-const { createProxyMiddleware } = require('http-proxy-middleware');
+// Bu kod Vercel'in "Serverless Function" yapısına %100 uyumludur.
+// Harici kütüphane gerektirmez.
 
-const app = express();
+export default async function handler(req, res) {
+  // 1. CORS İZİNLERİ (Tarayıcıdan gelen isteklere kapıyı aç)
+  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, User-Agent');
 
-// 1. CORS ve Güvenlik Başlıkları
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-agentname");
-  
+  // Tarayıcı "İzin var mı?" diye sorarsa (OPTIONS), "Evet" de ve bitir.
   if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
+    res.status(200).end();
+    return;
   }
-  next();
-});
 
-// 2. Proxy Konfigürasyonu (Trendyol Tüneli)
-const proxyOptions = {
-  target: 'https://api.trendyol.com',
-  changeOrigin: true,
-  secure: true,
-  logLevel: 'debug', // Hata ayıklama için logları açtık
-  pathRewrite: function (path, req) {
-    // Vercel bazen dosya yolunu karıştırabilir, gelen yolu olduğu gibi alıyoruz.
-    return path;
-  },
-  onProxyReq: (proxyReq, req, res) => {
-    // Trendyol'un Güvenlik Duvarını Aşan Başlıklar (Stealth Mode)
-    proxyReq.setHeader('User-Agent', 'Partner-Integration-Client/1.0');
-    proxyReq.setHeader('Accept', 'application/json');
-    proxyReq.setHeader('Host', 'api.trendyol.com');
+  // 2. HEDEF ADRESİ OLUŞTUR
+  // Gelen adres neyse (örn: /sapigw/suppliers/...) onu Trendyol'un sonuna ekle.
+  const targetUrl = 'https://api.trendyol.com' + req.url;
+
+  try {
+    // 3. TRENDYOL'A İSTEK AT (Native Fetch)
+    // Burada "Stealth Mode" (Gizli Mod) başlıklarını ekliyoruz.
+    const response = await fetch(targetUrl, {
+      method: req.method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': req.headers.authorization || '', // Şifreyi aynen ilet
+        // Güvenlik duvarını aşan sihirli başlıklar:
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://partner.trendyol.com/',
+        'Origin': 'https://partner.trendyol.com',
+        'Host': 'api.trendyol.com'
+      },
+      // Eğer veri gönderiliyorsa (POST), veriyi JSON'a çevirip ekle
+      body: (req.method !== 'GET' && req.method !== 'HEAD') ? JSON.stringify(req.body) : null
+    });
+
+    // 4. TRENDYOL'DAN GELEN CEVABI OKU VE TARAYICIYA İLET
+    const data = await response.text(); // JSON yerine text alıyoruz ki hata varsa HTML'i de görelim
     
-    // POST işlemlerinde body verisini düzelt
-    if (req.body) {
-      const bodyData = JSON.stringify(req.body);
-      proxyReq.setHeader('Content-Type', 'application/json');
-      proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-      proxyReq.write(bodyData);
-    }
-  },
-  onProxyRes: (proxyRes, req, res) => {
-    proxyRes.headers['Access-Control-Allow-Origin'] = '*'; // Cevap dönerken de CORS ekle
+    // Trendyol'un verdiği durum kodunu (200, 403, 500) aynen yansıt
+    res.status(response.status).send(data);
+
+  } catch (error) {
+    // Sunucu hatası olursa
+    console.error("Proxy Hatası:", error);
+    res.status(500).json({ error: "Proxy Hatası: " + error.message });
   }
-};
-
-// Express Body Parser (POST verisini okumak için gerekli)
-app.use(express.json());
-
-// 3. Tüm İstekleri Yakala ve Proxy'ye İlet
-// '*' kullanarak gelen her şeyi, adresi ne olursa olsun yakalıyoruz.
-app.use('*', createProxyMiddleware(proxyOptions));
-
-module.exports = app;
+}
