@@ -1,6 +1,6 @@
 {
   "name": "trendyol-proxy",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "scripts": {
     "start": "node api/index.js"
   }
