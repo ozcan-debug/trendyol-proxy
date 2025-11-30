@@ -1,24 +1,29 @@
+// Vercel Native Serverless Function (Kütüphanesiz)
+// Node.js'in yerleşik 'fetch' özelliğini kullanır.
+
 export default async function handler(req, res) {
-  // 1. CORS İZİNLERİ (Tarayıcıya "Sorun yok, geç" diyoruz)
-  res.setHeader('Access-Control-Allow-Credentials', true);
+  // 1. KAPIYI SONUNA KADAR AÇ (CORS FIX)
+  // Hangi siteden gelirse gelsin, izin ver.
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
   res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, User-Agent');
 
-  // 2. ÖN KONTROL (OPTIONS) İSTEĞİ
+  // 2. TARAYICI "GİREBİLİR MİYİM?" (OPTIONS) DİYE SORARSA:
   if (req.method === 'OPTIONS') {
-    res.status(200).end();
+    res.status(200).end(); // "Evet girebilirsin" de ve işlemi bitir.
     return;
   }
 
   try {
-    // 3. HEDEF ADRESİ OLUŞTUR
-    // Gelen URL: /sapigw/suppliers/... -> Hedef: https://api.trendyol.com/sapigw/suppliers/...
-    const targetUrl = 'https://api.trendyol.com' + req.url;
+    // 3. HEDEF ADRESİ BELİRLE
+    // Gelen istekteki yolu al (örn: /sapigw/suppliers/...)
+    const path = req.url;
+    const targetUrl = 'https://api.trendyol.com' + path;
 
-    // 4. TRENDYOL'A GİDEN İSTEK (STEALTH MODE - GİZLİ MOD)
-    // Kendimizi "Partner Paneli" gibi gösteriyoruz.
-    const fetchOptions = {
+    // 4. TRENDYOL'A GİT (STEALTH MODE)
+    // Trendyol'un güvenlik duvarını aşan "Ben Chrome'um" başlıkları
+    const response = await fetch(targetUrl, {
       method: req.method,
       headers: {
         'Content-Type': 'application/json',
@@ -27,27 +32,21 @@ export default async function handler(req, res) {
         'Referer': 'https://partner.trendyol.com/',
         'Origin': 'https://partner.trendyol.com',
         'Host': 'api.trendyol.com'
-      }
-    };
+      },
+      // POST veya PUT ise veriyi de ekle
+      body: (req.method !== 'GET' && req.method !== 'HEAD') ? JSON.stringify(req.body) : null
+    });
 
-    // Eğer POST isteği ise ve body varsa ekle
-    if (req.body && (req.method === 'POST' || req.method === 'PUT')) {
-      fetchOptions.body = JSON.stringify(req.body);
-    }
-
-    // Trendyol'a Ateşle!
-    const response = await fetch(targetUrl, fetchOptions);
-    
-    // Trendyol'dan gelen cevabı oku (Text olarak alıyoruz ki HTML hatası varsa görelim)
+    // 5. CEVABI AL VE TARAYICIYA VER
+    // Text olarak alıyoruz ki hata HTML ise görebilelim
     const data = await response.text();
 
-    // 5. CEVABI TARAYICIYA İLET
-    // Trendyol ne dediyse (200, 403, 404) aynen iletiyoruz.
+    // Trendyol'dan gelen durum kodunu (200, 404, 500) aynen yansıt
     res.status(response.status).send(data);
 
   } catch (error) {
-    // Sunucu hatası olursa 500 dön ve hatayı yaz
+    // Sunucu içinde bir hata olursa 500 dön
     console.error("Proxy Hatası:", error);
-    res.status(500).json({ error: "Proxy Hatası: " + error.message });
+    res.status(500).json({ error: "Proxy Bağlantı Hatası: " + error.message });
   }
 }
