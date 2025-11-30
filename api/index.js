@@ -1,57 +1,53 @@
-// Vercel Native Proxy - Manuel URL İnşası
-const url = require('url');
-
 export default async function handler(req, res) {
-  // 1. CORS İzinleri (Tarayıcı Dostu)
+  // 1. CORS İZİNLERİ (Tarayıcıya "Sorun yok, geç" diyoruz)
+  res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-agentname');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, User-Agent');
 
+  // 2. ÖN KONTROL (OPTIONS) İSTEĞİ
   if (req.method === 'OPTIONS') {
     res.status(200).end();
     return;
   }
 
   try {
-    // 2. URL TEMİZLİĞİ VE İNŞASI (En Kritik Kısım)
-    // Gelen isteğin tam URL'sini alıyoruz
-    const requestUrl = req.url;
-    
-    // Vercel bazen internal pathleri ekler, temizleyelim
-    // Bizim istediğimiz "/sapigw/..." ile başlayan kısımdır.
-    // Eğer url "/api/index.js?..." gibi gelirse bunu düzeltmemiz lazım.
-    
-    let pathToSend = requestUrl;
-    
-    // Eğer istek "/api/index" içeriyorsa bu Vercel'in iç yönlendirmesidir, bunu atlayıp query'ye bakabiliriz
-    // Ancak genelde rewrites ile "/sapigw/..." olarak gelir.
-    
-    // HEDEF ADRES:
-    const targetUrl = 'https://api.trendyol.com' + pathToSend;
+    // 3. HEDEF ADRESİ OLUŞTUR
+    // Gelen URL: /sapigw/suppliers/... -> Hedef: https://api.trendyol.com/sapigw/suppliers/...
+    const targetUrl = 'https://api.trendyol.com' + req.url;
 
-    // 3. TRENDYOL'A İSTEK (Stealth Mode Headers)
-    const response = await fetch(targetUrl, {
+    // 4. TRENDYOL'A GİDEN İSTEK (STEALTH MODE - GİZLİ MOD)
+    // Kendimizi "Partner Paneli" gibi gösteriyoruz.
+    const fetchOptions = {
       method: req.method,
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': req.headers.authorization || '',
+        'Authorization': req.headers.authorization || '', // Şifreyi taşı
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Referer': 'https://partner.trendyol.com/',
         'Origin': 'https://partner.trendyol.com',
         'Host': 'api.trendyol.com'
-      },
-      body: (req.method !== 'GET' && req.method !== 'HEAD') ? JSON.stringify(req.body) : null
-    });
+      }
+    };
 
-    // 4. CEVABI DÖN
+    // Eğer POST isteği ise ve body varsa ekle
+    if (req.body && (req.method === 'POST' || req.method === 'PUT')) {
+      fetchOptions.body = JSON.stringify(req.body);
+    }
+
+    // Trendyol'a Ateşle!
+    const response = await fetch(targetUrl, fetchOptions);
+    
+    // Trendyol'dan gelen cevabı oku (Text olarak alıyoruz ki HTML hatası varsa görelim)
     const data = await response.text();
-    
-    // Debug Header (Panelde hatayı görürsek hangi adrese gittiğimizi anlamak için)
-    res.setHeader('x-debug-target-url', targetUrl);
-    
+
+    // 5. CEVABI TARAYICIYA İLET
+    // Trendyol ne dediyse (200, 403, 404) aynen iletiyoruz.
     res.status(response.status).send(data);
 
   } catch (error) {
-    res.status(500).json({ error: "Proxy İç Hatası: " + error.message });
+    // Sunucu hatası olursa 500 dön ve hatayı yaz
+    console.error("Proxy Hatası:", error);
+    res.status(500).json({ error: "Proxy Hatası: " + error.message });
   }
 }
