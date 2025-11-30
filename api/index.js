@@ -1,34 +1,37 @@
 export default async function handler(req, res) {
-  // 1. MANUEL CORS (Vercel.json yetmezse diye çifte dikiş)
+  // 1. CORS İZİNLERİ (Tarayıcı Kapısı)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, User-Agent');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, User-Agent');
 
-  // 2. PREFLIGHT (ÖN UÇUŞ) KONTROLÜ - CORS HATASINI BİTİREN SATIR
   if (req.method === 'OPTIONS') {
     res.status(200).end();
     return;
   }
 
   try {
-    // 3. HEDEF URL (YOLU KAYBETMEDEN)
-    // Gelen url'nin başındaki "/" işaretini garantiye al
+    // 2. URL HAZIRLIĞI
     const path = req.url.startsWith('/') ? req.url : `/${req.url}`;
-    // Eğer path içinde "/api/index" varsa (Vercel bazen ekler), onu temizle
     const cleanPath = path.replace('/api/index', '');
-    
     const targetUrl = 'https://api.trendyol.com' + cleanPath;
 
-    // 4. TRENDYOL'A İSTEK (GİZLİ MOD)
+    // 3. POSTMAN TAKLİDİ (Headers)
+    // Tarayıcı gibi görünmeye çalışmak yerine, saf bir API istemcisi gibi görünüyoruz.
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': req.headers.authorization || '', // Şifre
+      'User-Agent': 'PostmanRuntime/7.29.2', // KİLİT NOKTA: Postman gibi davran
+      'Accept': '*/*',
+      'Cache-Control': 'no-cache',
+      'Host': 'api.trendyol.com',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Connection': 'keep-alive'
+    };
+
+    // 4. İSTEK GÖNDER
     const response = await fetch(targetUrl, {
       method: req.method,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': req.headers.authorization || '',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://partner.trendyol.com/',
-        'Origin': 'https://partner.trendyol.com'
-      },
+      headers: headers,
       body: (req.method !== 'GET' && req.method !== 'HEAD') ? JSON.stringify(req.body) : null
     });
 
@@ -37,7 +40,7 @@ export default async function handler(req, res) {
     res.status(response.status).send(data);
 
   } catch (error) {
-    console.error("Proxy Error:", error);
-    res.status(500).json({ error: "Proxy Bağlantı Hatası: " + error.message });
+    console.error("Proxy Hatası:", error);
+    res.status(500).json({ error: error.message });
   }
 }
